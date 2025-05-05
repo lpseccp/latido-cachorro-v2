@@ -1,17 +1,180 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>App para Cachorros</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="theme-color" content="#2c3e50" />
+  <title>Anti Latido - PWA</title>
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      background: #ecf0f1;
+      padding: 2rem;
+    }
+
+    h1 {
+      margin-bottom: 1rem;
+    }
+
+    #status {
+      font-size: 1.2rem;
+      font-weight: bold;
+      margin-top: 1rem;
+      color: green;
+    }
+
+    #volume-bar {
+      width: 80%;
+      height: 20px;
+      background: #ccc;
+      margin: 2rem auto 0.5rem auto;
+      border-radius: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #volume-fill {
+      height: 100%;
+      width: 0%;
+      background: #3498db;
+      transition: width 0.1s;
+    }
+
+    #threshold-line {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: red;
+    }
+
+    button {
+      font-size: 1.2rem;
+      padding: 1rem 2rem;
+      margin-top: 1rem;
+    }
+
+    #trigger-status {
+      font-size: 1.1rem;
+      color: darkred;
+      margin-top: 1rem;
+      font-weight: bold;
+      visibility: hidden;
+    }
+
+    .control-group {
+      margin-top: 1.5rem;
+    }
+
+    label {
+      font-weight: bold;
+    }
+  </style>
 </head>
 <body>
-  <h1>App para Cachorros</h1>
-  <p>Quando seu cachorro latir, o comando de voz será ativado!</p>
-  <button id="startButton">Iniciar Detecção de Som</button>
-  <audio id="audioPlayer" src="comando_de_voz.mp3" preload="auto"></audio>
-  
-  <script src="script.js"></script>
+  <h1>Anti Latido</h1>
+  <p>Toque em "Iniciar" e mantenha a aba aberta. O app detecta som e toca o comando de voz.</p>
+  <button onclick="start()">Iniciar</button>
+
+  <div id="status">Status: Aguardando início...</div>
+
+  <div id="volume-bar">
+    <div id="threshold-line"></div>
+    <div id="volume-fill"></div>
+  </div>
+
+  <div id="trigger-status">Comando enviado!</div>
+
+  <div class="control-group">
+    <label for="volumeRange">Volume do Comando:</label>
+    <input type="range" id="volumeRange" min="0" max="1" step="0.01" value="1" />
+  </div>
+
+  <div class="control-group">
+    <label for="sensitivityRange">Sensibilidade (nível para ativar comando):</label>
+    <input type="range" id="sensitivityRange" min="1" max="100" value="20" />
+    <div><small>Quanto menor, mais sensível</small></div>
+  </div>
+
+  <script>
+    let audio = new Audio("comando.mp3");
+    let wakeLock = null;
+    let lastPlayed = 0;
+
+    const volumeSlider = document.getElementById("volumeRange");
+    const sensitivitySlider = document.getElementById("sensitivityRange");
+    const thresholdLine = document.getElementById("threshold-line");
+
+    // Atualiza volume do som
+    volumeSlider.addEventListener("input", () => {
+      audio.volume = volumeSlider.value;
+    });
+
+    // Move linha de limite de sensibilidade
+    sensitivitySlider.addEventListener("input", updateThresholdLine);
+    function updateThresholdLine() {
+      const value = sensitivitySlider.value;
+      const positionPercent = (value / 100) * 100;
+      thresholdLine.style.left = `${positionPercent}%`;
+    }
+
+    updateThresholdLine(); // inicializa posição da linha
+
+    async function start() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const context = new AudioContext();
+        const source = context.createMediaStreamSource(stream);
+        const analyser = context.createAnalyser();
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        source.connect(analyser);
+
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+
+        document.getElementById("status").textContent = "Status: Ativado e escutando...";
+
+        function checkVolume() {
+          analyser.getByteFrequencyData(data);
+          let volume = data.reduce((a, b) => a + b) / data.length;
+
+          // Atualiza barra de volume visual
+          let volumePercent = Math.min((volume / 100) * 100, 100);
+          document.getElementById("volume-fill").style.width = volumePercent + "%";
+
+          const now = Date.now();
+          const limite = parseInt(sensitivitySlider.value);
+
+          if (volume > limite && (now - lastPlayed > 3000)) {
+            if (audio.paused) {
+              audio.play();
+              lastPlayed = now;
+
+              const triggerStatus = document.getElementById("trigger-status");
+              triggerStatus.style.visibility = "visible";
+              setTimeout(() => triggerStatus.style.visibility = "hidden", 2000);
+            }
+          }
+
+          requestAnimationFrame(checkVolume);
+        }
+
+        checkVolume();
+
+      } catch (err) {
+        alert("Erro ao acessar microfone: " + err.message);
+        document.getElementById("status").textContent = "Erro ao acessar microfone.";
+      }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (wakeLock !== null && document.visibilityState === "visible") {
+        navigator.wakeLock.request('screen');
+      }
+    });
+  </script>
 </body>
 </html>
